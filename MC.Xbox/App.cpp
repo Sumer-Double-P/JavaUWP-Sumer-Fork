@@ -32,6 +32,7 @@
 #include "auth_screen.h"
 #include "launcher_ui.h"
 #include "web_relay_server.h"
+#include "remote_file_server.h"
 #include "app_globals.h"
 #include "loader.h"
 #include "runtime_manager.h"
@@ -519,12 +520,14 @@ public:
         while (true) {
             if (!authConfigReady && !ResolveLaunchAuthConfig(g_authWindow.Get(), authConfig)) {
                 WriteLog(L"Dynamic authentication failed");
-                return E_FAIL;
+                Sleep(1000);
+                continue;
             }
             authConfigReady = true;
 
             const MainMenuAction menuAction = ShowMainMenu(g_authWindow.Get(), authConfig, exeDir);
             if (menuAction == MainMenuAction::Play) {
+                if (RemoteFileImportRunning()) continue;
                 break;
             }
             if (menuAction == MainMenuAction::RepairDownloads) {
@@ -601,11 +604,16 @@ public:
                 L"Copying packaged files into writable app storage",
                 0.04f);
 
-            SeedLocalRuntime(packageDir, exeDir,
+            const bool seeded = SeedLocalRuntime(packageDir, exeDir,
                 [&](const wchar_t* status, const wchar_t* detail, float progress) {
                     RenderPreparationProgress(prepRenderer, prepState, status, detail, progress);
                 });
 
+            if (!seeded) {
+                RenderPreparationProgress(prepRenderer, prepState, L"Runtime copy failed", L"Check available storage and retry from the menu", 1.0f);
+                SleepWithAuthUi(prepRenderer, prepState, 5000);
+                continue;
+            }
             SleepWithAuthUi(prepRenderer, prepState, 350);
         } else if (exeDir != packageDir) {
             WriteLog(L"LocalState runtime seed is current; skipping copy");
@@ -643,6 +651,8 @@ public:
                 0.0f);
 
             int downloadAttempt = 0;
+            bool downloadCancelled = false;
+            std::wstring lastDownloadStatus, lastDownloadDetail;
             for (;;) {
                 ++downloadAttempt;
                 DownloadOptions downloadOptions;
@@ -654,6 +664,8 @@ public:
                     exeDir,
                     versionInfo.targetId,
                     [&](const wchar_t* status, const wchar_t* detail, float progress) {
+                        lastDownloadStatus = status ? status : L"";
+                        lastDownloadDetail = detail ? detail : L"";
                         RenderPreparationProgress(downloadRenderer, downloadState, status, detail, progress);
                     },
                     downloadOptions)) {
@@ -664,10 +676,16 @@ public:
                 RenderPreparationProgress(
                     downloadRenderer,
                     downloadState,
-                    L"Download failed",
-                    L"Could not prepare Minecraft files. Retrying in 10 seconds",
+                    lastDownloadStatus.empty() ? L"Download failed" : lastDownloadStatus.c_str(),
+                    (lastDownloadDetail + L"\nRetrying in 10 seconds. B or Escape returns to the menu").c_str(),
                     1.0f);
-                SleepWithAuthUi(downloadRenderer, downloadState, 10000);
+                for (int wait = 0; wait < 100 && !downloadCancelled; ++wait) {
+                    SleepWithAuthUi(downloadRenderer, downloadState, 100);
+                    downloadCancelled = AnyVirtualKeyDown(g_authWindow.Get(), {
+                        ABI::Windows::System::VirtualKey_Escape,
+                        ABI::Windows::System::VirtualKey_GamepadB });
+                }
+                if (downloadCancelled) break;
                 RenderPreparationProgress(
                     downloadRenderer,
                     downloadState,
@@ -676,6 +694,7 @@ public:
                     0.0f);
             }
 
+            if (downloadCancelled) continue;
             SleepWithAuthUi(downloadRenderer, downloadState, 250);
         }
 
@@ -773,8 +792,6 @@ public:
         std::vector<std::wstring> jars;
         if (!versionInfo.loaderJar.empty()) {
             jars.push_back(versionInfo.loaderJar);
-        } else {
-            LoaderCollectExtraClasspathJars(preLaunchCtx, jars);
         }
         CollectManifestLibraryJars(effManifestPath, exeDir, packageDir, jars);
         jars.push_back(clientJar);
@@ -808,6 +825,10 @@ public:
             loaderLabel = L"Forge";
         }
 
+        if (std::chrono::steady_clock::now() + std::chrono::minutes(5) >= authConfig.expiresAt) {
+            authConfigReady = ResolveLaunchAuthConfig(g_authWindow.Get(), authConfig);
+            if (!authConfigReady) continue;
+        }
         g_minecraftRunning.store(true);
         const bool jvmSpentBeforeLaunch = EmbeddedJvmAlreadyUsed();
         const std::wstring effLaunchVersion = versionInfo.launchVersion.empty() ? a2w(kFabricLaunchVersion) : versionInfo.launchVersion;
@@ -825,6 +846,7 @@ public:
                     javaRuntime.packageRelativeDir,
                     javaRuntime.javaBasePatchName,
                     javaRuntime.zipfsPatchName,
+                    javaRuntime.javaDesktopPatchName,
                     gameDir,
                     assetsDir,
                     nativesDir,
@@ -844,9 +866,7 @@ public:
                     versionInfo.extraGameArgs,
                     versionInfo.neoFormVersion,
                     versionInfo.neoForgeInstallToolsVersion,
-                    versionInfo.neoForgeJarSplitterVersion,
                     versionInfo.neoForgeBinaryPatcherVersion,
-                    versionInfo.neoForgeAutoRenamingToolVersion,
                     authConfig,
                     progress);
             });
