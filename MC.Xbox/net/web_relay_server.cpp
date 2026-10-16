@@ -8,6 +8,9 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <mutex>
+#include <memory>
+#include <vector>
 
 #include "launcher_common.h"
 
@@ -244,6 +247,9 @@ private:
     std::atomic<bool> stop_{ false };
     std::atomic<SOCKET> listenSocket_{ INVALID_SOCKET };
     std::thread thread_;
+    struct Client { SOCKET socket; std::thread thread; std::atomic<bool> done{false}; };
+    std::vector<std::unique_ptr<Client>> clients_;
+
 
     void ThreadMain() {
         WSADATA wsa = {};
@@ -287,12 +293,30 @@ private:
                 closesocket(client);
                 break;
             }
-            std::thread([this, client]() {
-                HandleClient(client);
-                closesocket(client);
-            }).detach();
+            for (auto it = clients_.begin(); it != clients_.end();) {
+                if ((*it)->done.load()) { (*it)->thread.join(); closesocket((*it)->socket); it = clients_.erase(it); }
+                else { ++it; }
+            }
+            if (clients_.size() >= 8) { closesocket(client); continue; }
+            DWORD timeout = 2000;
+            setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+            setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+            auto state = std::make_unique<Client>();
+            state->socket = client;
+            Client* current = state.get();
+            current->thread = std::thread([this, current]() {
+                HandleClient(current->socket);
+                current->done.store(true);
+            });
+            clients_.push_back(std::move(state));
         }
 
+        for (const auto& client : clients_) shutdown(client->socket, SD_BOTH);
+        for (const auto& client : clients_) {
+            client->thread.join();
+            closesocket(client->socket);
+        }
+        clients_.clear();
         SOCKET old = listenSocket_.exchange(INVALID_SOCKET);
         if (old != INVALID_SOCKET) closesocket(old);
         WSACleanup();
