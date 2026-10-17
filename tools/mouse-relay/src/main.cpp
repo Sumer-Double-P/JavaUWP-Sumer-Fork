@@ -373,13 +373,13 @@ static std::optional<std::pair<float, float>> ParseSyncStatus(const std::string&
 
     char* end = nullptr;
     const float x = std::strtof(text.c_str() + prefixLength, &end);
-    if (!end || static_cast<size_t>(end - text.c_str()) != comma) {
+    if (!std::isfinite(x) || end == text.c_str() + prefixLength || !end || static_cast<size_t>(end - text.c_str()) != comma) {
         return std::nullopt;
     }
 
     end = nullptr;
     const float y = std::strtof(text.c_str() + comma + 1, &end);
-    if (!end || *end != '\0') {
+    if (!std::isfinite(y) || end == text.c_str() + comma + 1 || !end || *end != '\0') {
         return std::nullopt;
     }
 
@@ -404,13 +404,13 @@ static std::optional<std::pair<float, float>> ParsePairStatus(const std::string&
 
     char* end = nullptr;
     const float x = std::strtof(text.c_str() + prefixLength, &end);
-    if (!end || static_cast<size_t>(end - text.c_str()) != comma) {
+    if (!std::isfinite(x) || end == text.c_str() + prefixLength || !end || static_cast<size_t>(end - text.c_str()) != comma) {
         return std::nullopt;
     }
 
     end = nullptr;
     const float y = std::strtof(text.c_str() + comma + 1, &end);
-    if (!end || !IsStatusTerminator(*end)) {
+    if (!std::isfinite(y) || end == text.c_str() + comma + 1 || !end || !IsStatusTerminator(*end)) {
         return std::nullopt;
     }
 
@@ -426,14 +426,14 @@ static std::optional<std::pair<float, float>> ParseDimensionStatus(const std::st
     const char* start = text.c_str() + marker + std::strlen(markerText);
     char* end = nullptr;
     const float width = std::strtof(start, &end);
-    if (!end || *end != 'x') {
+    if (!std::isfinite(width) || end == start || !end || *end != 'x') {
         return std::nullopt;
     }
 
     start = end + 1;
     end = nullptr;
     const float height = std::strtof(start, &end);
-    if (width < 1.0f || height < 1.0f) {
+    if (!std::isfinite(height) || end == start || width < 1.0f || height < 1.0f || width > 16384.0f || height > 16384.0f) {
         return std::nullopt;
     }
     if (!end || !IsStatusTerminator(*end)) {
@@ -567,7 +567,6 @@ public:
             return false;
         }
 
-        host_ = host;
         return true;
     }
 
@@ -642,7 +641,6 @@ private:
     SocketHandle inputSock_ = kInvalidSocket;
     SocketHandle statusSock_ = kInvalidSocket;
     sockaddr_in destination_{};
-    std::string host_;
 };
 
 class RelayApp {
@@ -970,33 +968,11 @@ private:
         return std::nullopt;
     }
 
-    UiAction HitActionAtUi(float uiX, float uiY) const {
-        const std::optional<Button> button = HitButtonAtUi(uiX, uiY);
-        return button ? button->action : UiAction::None;
-    }
-
     std::optional<Button> HitButton(float windowX, float windowY) const {
         const float scale = UiScale();
         return HitButtonAtUi(
             (windowX - static_cast<float>(safeArea_.x)) / scale,
             (windowY - static_cast<float>(safeArea_.y)) / scale);
-    }
-
-    UiAction HitAction(float windowX, float windowY) const {
-        const std::optional<Button> button = HitButton(windowX, windowY);
-        return button ? button->action : UiAction::None;
-    }
-
-    UiAction HitActionAtRelayCursor() const {
-        if (enteringIp_ || mode_ != RelayMode::Menu) {
-            return UiAction::None;
-        }
-
-        const float uiWidth = UiAreaWidth();
-        const float uiHeight = UiAreaHeight();
-        const float uiX = Clamp((virtualX_ / MenuTargetWidth()) * uiWidth, 0.0f, uiWidth - 1.0f);
-        const float uiY = Clamp((virtualY_ / MenuTargetHeight()) * uiHeight, 0.0f, uiHeight - 1.0f);
-        return HitActionAtUi(uiX, uiY);
     }
 
     void ExecuteAction(UiAction action) {
@@ -1469,6 +1445,7 @@ private:
 
         ++statusPackets_;
         connected_ = true;
+        lastStatusTime_ = NowSeconds();
         lastStatus_ = status;
 
         if (size) {
@@ -1490,20 +1467,6 @@ private:
             }
             SyncMenuPos(syncX, syncY, true);
             return;
-        }
-
-        if (mode_ == RelayMode::Menu) {
-            if (windowCursor) {
-                SyncMenuPos(
-                    WindowToMenuX(windowCursor->first),
-                    WindowToMenuY(windowCursor->second),
-                    true);
-            } else if (protocolCursor) {
-                SyncMenuPos(
-                    protocolCursor->first * (MenuTargetWidth() / kTargetWidth),
-                    protocolCursor->second * (MenuTargetHeight() / kTargetHeight),
-                    true);
-            }
         }
 
         if (hasMode) {
@@ -1691,7 +1654,7 @@ private:
 
         // no time gate, the loop already ticks at this interval and a late wake doubles up
         const bool motionDue = motionPending_;
-        const bool heldRefreshDue = AnyLocalMouseButtonDown() && (now - lastHeldButtonRefresh_) >= kHeldButtonRefreshSeconds;
+        const bool heldRefreshDue = (now - lastHeldButtonRefresh_) >= kHeldButtonRefreshSeconds;
         if (heldRefreshDue) {
             packetButtons = buttonState_;
             haveButtonChange = true;
@@ -1705,17 +1668,18 @@ private:
                 ? FormatAbsPacket(virtualX_, virtualY_, packetButtons, scroll)
                 : FormatPacket(accumDx_, accumDy_, packetButtons, scroll);
 
-            if (transport_.Send(packet)) {
-                ++sentPackets_;
+            if (!transport_.Send(packet)) {
+                pendingScroll_ += scroll;
+                return;
             }
+            ++sentPackets_;
 
             accumDx_ = 0.0f;
             accumDy_ = 0.0f;
             motionPending_ = false;
             if (lastSendStamp_ > 0.0) {
                 const double dtMs = (now - lastSendStamp_) * 1000.0;
-                sendDtMinMs_ = std::min(sendDtMinMs_, dtMs);
-                sendDtMaxMs_ = std::max(sendDtMaxMs_, dtMs);
+                (void)dtMs;
             }
             lastSendStamp_ = now;
             if (heldRefreshDue) {
@@ -1889,12 +1853,7 @@ private:
             UiAreaWidth(), UiAreaHeight(), UiScale());
         DrawText(18.0f, 162.0f, diagLine, SDL_Color{ 150, 205, 165, 255 });
 
-        char sendLine[120];
-        std::snprintf(sendLine, sizeof(sendLine), "Send dt(ms): min=%.1f max=%.1f (even ~4.2 = no render starvation)", sendDtMinMs_, sendDtMaxMs_);
-        DrawText(18.0f, 182.0f, sendLine, SDL_Color{ 205, 195, 150, 255 });
-        sendDtMinMs_ = 1000.0;
-        sendDtMaxMs_ = 0.0;
-
+        if (connected_ && NowSeconds() - lastStatusTime_ > 5.0) connected_ = false;
         char logLine[256];
         if (g_packetLog.Enabled()) {
             std::snprintf(logLine, sizeof(logLine), "Packet log: ON -> %s", g_packetLog.Path().c_str());
@@ -1938,6 +1897,7 @@ private:
     bool connecting_ = false;
     bool hostSet_ = false;
     bool connected_ = false;
+    double lastStatusTime_ = 0.0;
 
     int windowWidth_ = 1280;
     int windowHeight_ = 720;
@@ -1981,8 +1941,6 @@ private:
     double lastTouchScrollRepeat_ = 0.0;
     double lastPing_ = 0.0;
     double lastSendStamp_ = 0.0;
-    double sendDtMinMs_ = 1000.0;
-    double sendDtMaxMs_ = 0.0;
     std::atomic<uint64_t> sentPackets_{ 0 };
     uint64_t statusPackets_ = 0;
 

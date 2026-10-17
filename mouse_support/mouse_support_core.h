@@ -51,6 +51,9 @@ public:
         absX_ = 0.0;
         absY_ = 0.0;
         targetButtons_ = 0;
+        edgeHead_ = 0;
+        edgeCount_ = 0;
+        absoluteWheel_ = 0.0;
         appliedButtons_ = 0;
         pendingX_ = 0.0;
         pendingY_ = 0.0;
@@ -84,6 +87,7 @@ public:
         absY_ = y;
         absWindow_ = window;
         hasAbs_ = true;
+        for (int i = 0; i < count_; ++i) absoluteWheel_ += ring_[(head_ + i) % kCap].wheel;
         head_ = 0;
         count_ = 0;
         if (wheel != 0.0) {
@@ -94,6 +98,12 @@ public:
 
     void submitButtonValue(int bit, int value) {
         if (value < 0) return;
+        const bool down = value != 0;
+        if (down != ((targetButtons_ & bit) != 0) && mapBitToButton(bit) >= 0) {
+            if (edgeCount_ == kCap) { edgeHead_ = 0; edgeCount_ = 0; }
+            edges_[(edgeHead_ + edgeCount_) % kCap] = { mapBitToButton(bit), down ? ButtonPress : ButtonRelease };
+            ++edgeCount_;
+        }
         if (value != 0) targetButtons_ |= bit;
         else targetButtons_ &= ~bit;
     }
@@ -101,7 +111,8 @@ public:
     void consume(long long nowMicros, long long freshnessMicros, double clampMax, ConsumeResult& out) {
         out.dx = 0.0;
         out.dy = 0.0;
-        out.wheel = 0.0;
+        out.wheel = absoluteWheel_;
+        absoluteWheel_ = 0.0;
         out.hasAbsolute = false;
         out.absoluteWindow = false;
         out.absX = 0.0;
@@ -192,6 +203,16 @@ public:
         out.pendingX = pendingX_;
         out.pendingY = pendingY_;
 
+        const int edgeLimit = (int)(sizeof(out.buttons) / sizeof(out.buttons[0]));
+        while (edgeCount_ > 0 && out.buttonCount < edgeLimit) {
+            const auto event = edges_[edgeHead_];
+            out.buttons[out.buttonCount++] = event;
+            if (event.action == ButtonPress) appliedButtons_ |= 1 << event.button;
+            else appliedButtons_ &= ~(1 << event.button);
+            edgeHead_ = (edgeHead_ + 1) % kCap;
+            --edgeCount_;
+        }
+        if (edgeCount_ > 0) return;
         const int diff = targetButtons_ ^ appliedButtons_;
         const int maxButtons = (int)(sizeof(out.buttons) / sizeof(out.buttons[0]));
         for (int bit = 1; bit <= 16 && out.buttonCount < maxButtons; bit <<= 1) {
@@ -258,6 +279,10 @@ private:
     bool absWindow_;
     double absX_;
     double absY_;
+    ButtonEvent edges_[kCap];
+    int edgeHead_;
+    int edgeCount_;
+    double absoluteWheel_;
     int targetButtons_;
     int appliedButtons_;
     double pendingX_;

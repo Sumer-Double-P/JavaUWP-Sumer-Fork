@@ -13,7 +13,9 @@ $buildPath = Join-Path $repoRoot $BuildDir
 New-Item -ItemType Directory -Force -Path $buildPath | Out-Null
 
 cmake -S $sourceDir -B $buildPath -DCMAKE_BUILD_TYPE=$Config
+if ($LASTEXITCODE -ne 0) { throw "Mouse relay CMake configure failed ($LASTEXITCODE)" }
 cmake --build $buildPath --config $Config --parallel
+if ($LASTEXITCODE -ne 0) { throw "Mouse relay CMake build failed ($LASTEXITCODE)" }
 
 $exe = Get-ChildItem -Path $buildPath -Recurse -Filter "BanditMouseRelay.exe" |
     Where-Object { $_.FullName -match "\\$Config\\" -or $_.DirectoryName -eq $buildPath } |

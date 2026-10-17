@@ -7,6 +7,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <mutex>
 
 #include "mouse_support_core.h"
 #include "mouse_support_api.h"
@@ -33,6 +34,9 @@ mousesupport::MouseMailbox g_mailbox;
 MouseSupportHostState g_host = { 1920, 1080, 960, 540, kCursorModeDisabled, 960.0, 540.0 };
 
 SOCKET g_statusSocket = INVALID_SOCKET;
+std::mutex g_lifecycleMutex;
+std::mutex g_diagMutex;
+bool g_winsockStarted = false;
 SOCKET g_overlaySocket = INVALID_SOCKET;
 sockaddr_in g_statusAddr = {};
 bool g_haveStatusAddr = false;
@@ -81,6 +85,7 @@ void DiagOpenIfNeeded() {
 }
 
 void DiagLog(const char* fmt, ...) {
+    std::lock_guard<std::mutex> guard(g_diagMutex);
     if (!g_diag) return;
     char line[512];
     va_list args;
@@ -134,12 +139,6 @@ int StableModeLocked() {
     return g_reportedMode;
 }
 
-void EnsureStatusSocket() {
-    if (g_statusSocket == INVALID_SOCKET) {
-        g_statusSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    }
-}
-
 void SendStatusText(const char* text) {
     sockaddr_in target = {};
     bool haveTarget = false;
@@ -151,7 +150,6 @@ void SendStatusText(const char* text) {
     ReleaseSRWLockShared(&g_lock);
     if (!haveTarget) return;
 
-    EnsureStatusSocket();
     if (g_statusSocket == INVALID_SOCKET) return;
     sendto(g_statusSocket, text, (int)strlen(text), 0,
         reinterpret_cast<const sockaddr*>(&target), sizeof(target));
@@ -175,6 +173,7 @@ DWORD WINAPI ReceiveThreadProc(LPVOID) {
     SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock == INVALID_SOCKET) {
         Log("socket failed err=%d", WSAGetLastError());
+        InterlockedExchange(&g_started, 0);
         return 0;
     }
 
@@ -185,6 +184,7 @@ DWORD WINAPI ReceiveThreadProc(LPVOID) {
     if (bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
         Log("bind UDP %u failed err=%d", kInputPort, WSAGetLastError());
         closesocket(sock);
+        InterlockedExchange(&g_started, 0);
         return 0;
     }
 
@@ -192,7 +192,13 @@ DWORD WINAPI ReceiveThreadProc(LPVOID) {
     int rcvBuf = kRecvBufBytes;
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&rcvBuf), sizeof(rcvBuf));
     DWORD rcvTimeoutMs = 50;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&rcvTimeoutMs), sizeof(rcvTimeoutMs));
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&rcvTimeoutMs), sizeof(rcvTimeoutMs)) == SOCKET_ERROR) {
+        Log("receive timeout failed err=%d", WSAGetLastError());
+        closesocket(sock);
+        InterlockedExchange(&g_started, 0);
+        return 0;
+    }
+    InterlockedExchange(&g_started, 1);
 
     Log("listening on UDP %u (freshness %lldms)", kInputPort, g_freshnessMicros / 1000);
 
@@ -234,10 +240,9 @@ DWORD WINAPI ReceiveThreadProc(LPVOID) {
         }
 
         buf[len] = 0;
-        RememberStatusAddress(from);
-        InterlockedExchange(&g_lastActivityTick, (LONG)GetTickCount());
-
         if (strcmp(buf, "hello") == 0 || strcmp(buf, "ping") == 0) {
+            RememberStatusAddress(from);
+            InterlockedExchange(&g_lastActivityTick, (LONG)GetTickCount());
             char ack[160] = {};
             sprintf_s(ack, "javauwp_glfw_mouse:ready mode=%d cursor=%.0f,%.0f cursorw=%.0f,%.0f size=%dx%d menu=%dx%d",
                 stableMode,
@@ -260,22 +265,28 @@ DWORD WINAPI ReceiveThreadProc(LPVOID) {
         bool absolutePacket = false;
         bool absoluteWindowPacket = false;
         int fields = 0;
+        int consumed = 0;
         if (strncmp(buf, "ABSW:", 5) == 0) {
             absolutePacket = true;
             absoluteWindowPacket = true;
-            fields = sscanf_s(buf + 5, "%f,%f,%d,%d,%d,%f,%d,%d", &dx, &dy, &lb, &rb, &mb, &wheelY, &x1, &x2);
+            fields = sscanf_s(buf + 5, "%f,%f,%d,%d,%d,%f,%d,%d%n", &dx, &dy, &lb, &rb, &mb, &wheelY, &x1, &x2, &consumed);
         } else if (strncmp(buf, "ABS:", 4) == 0) {
             absolutePacket = true;
-            fields = sscanf_s(buf + 4, "%f,%f,%d,%d,%d,%f,%d,%d", &dx, &dy, &lb, &rb, &mb, &wheelY, &x1, &x2);
+            fields = sscanf_s(buf + 4, "%f,%f,%d,%d,%d,%f,%d,%d%n", &dx, &dy, &lb, &rb, &mb, &wheelY, &x1, &x2, &consumed);
         } else {
-            fields = sscanf_s(buf, "%f,%f,%d,%d,%d,%f,%d,%d", &dx, &dy, &lb, &rb, &mb, &wheelY, &x1, &x2);
+            fields = sscanf_s(buf, "%f,%f,%d,%d,%d,%f,%d,%d%n", &dx, &dy, &lb, &rb, &mb, &wheelY, &x1, &x2, &consumed);
         }
-        if (fields != 8) {
+        const char* values = buf + (absoluteWindowPacket ? 5 : (absolutePacket ? 4 : 0));
+        if (fields != 8 || values[consumed] != 0 || !std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(wheelY) ||
+            std::abs(dx) > 1000000 || std::abs(dy) > 1000000 || std::abs(wheelY) > 1000 ||
+            lb < -1 || lb > 1 || rb < -1 || rb > 1 || mb < -1 || mb > 1 || x1 < -1 || x1 > 1 || x2 < -1 || x2 > 1) {
             const char bad[] = "javauwp_glfw_mouse:bad_packet";
             sendto(sock, bad, (int)sizeof(bad) - 1, 0, reinterpret_cast<sockaddr*>(&from), fromLen);
             continue;
         }
 
+        RememberStatusAddress(from);
+        InterlockedExchange(&g_lastActivityTick, (LONG)GetTickCount());
         const long long tMicros = NowMicros();
         AcquireSRWLockExclusive(&g_lock);
         if (absolutePacket) {
@@ -326,6 +337,7 @@ DWORD WINAPI ReceiveThreadProc(LPVOID) {
     }
 
     closesocket(sock);
+    InterlockedExchange(&g_started, 0);
     Log("receive thread stopped");
     return 0;
 }
@@ -344,6 +356,7 @@ double ReadEnvDouble(const char* name, double fallback, double lo, double hi) {
     const DWORD n = GetEnvironmentVariableA(name, buf, sizeof(buf));
     if (n == 0 || n >= sizeof(buf)) return fallback;
     const double value = atof(buf);
+    if (!std::isfinite(value)) return fallback;
     if (value < lo) return lo;
     if (value > hi) return hi;
     return value;
@@ -354,7 +367,11 @@ double ReadEnvDouble(const char* name, double fallback, double lo, double hi) {
 extern "C" {
 
 MOUSE_SUPPORT_API void MouseSupport_Init(void) {
-    if (InterlockedExchange(&g_started, 1) != 0) return;
+    std::lock_guard<std::mutex> guard(g_lifecycleMutex);
+    if (InterlockedCompareExchange(&g_started, -1, 0) != 0) return;
+    if (g_receiveThread) { WaitForSingleObject(g_receiveThread, INFINITE); CloseHandle(g_receiveThread); g_receiveThread = nullptr; }
+    if (g_statusSocket != INVALID_SOCKET) { closesocket(g_statusSocket); g_statusSocket = INVALID_SOCKET; }
+    if (g_winsockStarted) { WSACleanup(); g_winsockStarted = false; }
 
     WSADATA wsa = {};
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
@@ -363,6 +380,9 @@ MOUSE_SUPPORT_API void MouseSupport_Init(void) {
         return;
     }
 
+    g_winsockStarted = true;
+    g_statusSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (g_statusSocket == INVALID_SOCKET) { WSACleanup(); g_winsockStarted = false; InterlockedExchange(&g_started, 0); return; }
     LARGE_INTEGER freq = {};
     QueryPerformanceFrequency(&freq);
     g_qpcTicksPerMicro = freq.QuadPart > 0 ? (double)freq.QuadPart / 1000000.0 : 1.0;
@@ -388,14 +408,16 @@ MOUSE_SUPPORT_API void MouseSupport_Init(void) {
 
     InterlockedExchange(&g_shutdown, 0);
     g_receiveThread = CreateThread(nullptr, 0, ReceiveThreadProc, nullptr, 0, nullptr);
+    if (!g_receiveThread) { closesocket(g_statusSocket); g_statusSocket = INVALID_SOCKET; WSACleanup(); g_winsockStarted = false; InterlockedExchange(&g_started, 0); return; }
     Log("initialized (freshness %.0fms, stall %.0fms, smoothTau %.1fms, clamp %.0f, diag %d)", freshnessMs, g_stallMs, g_smoothTauMs, g_clampMax, g_diag ? 1 : 0);
 }
 
 MOUSE_SUPPORT_API void MouseSupport_Shutdown(void) {
-    if (InterlockedCompareExchange(&g_started, 0, 0) == 0) return;
+    std::lock_guard<std::mutex> guard(g_lifecycleMutex);
+    if (!g_receiveThread && !g_winsockStarted) return;
     InterlockedExchange(&g_shutdown, 1);
     if (g_receiveThread) {
-        WaitForSingleObject(g_receiveThread, 300);
+        WaitForSingleObject(g_receiveThread, INFINITE);
         CloseHandle(g_receiveThread);
         g_receiveThread = nullptr;
     }
@@ -407,16 +429,18 @@ MOUSE_SUPPORT_API void MouseSupport_Shutdown(void) {
         closesocket(g_overlaySocket);
         g_overlaySocket = INVALID_SOCKET;
     }
+    std::lock_guard<std::mutex> diagnostics(g_diagMutex);
     if (g_diagFile) {
         fclose(g_diagFile);
         g_diagFile = nullptr;
     }
     InterlockedExchange(&g_started, 0);
+    if (g_winsockStarted) { WSACleanup(); g_winsockStarted = false; }
     Log("shutdown complete");
 }
 
 MOUSE_SUPPORT_API int MouseSupport_IsRunning(void) {
-    return InterlockedCompareExchange(&g_started, 0, 0) != 0 ? 1 : 0;
+    return InterlockedCompareExchange(&g_started, 0, 0) == 1 ? 1 : 0;
 }
 
 MOUSE_SUPPORT_API int MouseSupport_PollFrame(MouseSupportFrame* out) {
@@ -507,7 +531,7 @@ MOUSE_SUPPORT_API unsigned int MouseSupport_LastActivityTickMs(void) {
 }
 
 MOUSE_SUPPORT_API double MouseSupport_SmoothingMs(void) {
-    return (double)g_freshnessMicros / 1000.0;
+    return g_smoothTauMs;
 }
 
 }
