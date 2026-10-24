@@ -177,8 +177,8 @@ static void ShowRemoteFilesPage(ICoreWindow* window, AuthScreenRenderer* rendere
             state.status = url.empty() ? Tr(L"Remote Files has no LAN address") : Tr(L"Remote file manager is running");
             state.detail = url.empty()
                 ? Tr(L"Could not find a connected IPv4 LAN address. Connect to the local network and try again.")
-                : L"Open " + url + L"\nPIN: " + a2w(RemoteFileServerPin().c_str());
-            if (RemoteFileImportRunning()) state.detail += L"\nImport in progress. Wait for it to finish before leaving.";
+                : TrFormat(L"Open {0}\nPIN: {1}", { url, a2w(RemoteFileServerPin().c_str()) });
+            if (RemoteFileImportRunning()) state.detail += L"\n" + std::wstring(Tr(L"Import in progress. Wait for it to finish before leaving."));
         } else {
             state.status = Tr(L"Remote file manager is not running");
             state.detail = Tr(L"Could not start the LAN server on port 27632. Check that another copy is not already running.");
@@ -243,7 +243,7 @@ static std::wstring CrashSuspectLine(const telemetry::CrashRecord& record) {
     if (!record.suspectedMod.empty()) {
         std::wstring line = TrFormat(L"Suspected: {0}", { record.suspectedMod });
         if (!record.detail.targetMethod.empty()) {
-            line += L"\nIt asked for something this version of Minecraft does not have.";
+            line += L"\n" + std::wstring(Tr(L"It asked for something this version of Minecraft does not have."));
         }
         return line;
     }
@@ -275,12 +275,12 @@ static std::wstring CrashTraceText(const telemetry::CrashRecord& record) {
     for (const std::wstring& frame : record.frames) {
         text += L"\n  at " + frame;
     }
-    if (record.frames.empty()) text += L"\nNo stack trace was recovered.";
+    if (record.frames.empty()) text += L"\n" + std::wstring(Tr(L"No stack trace was recovered."));
     text += L"\n\nfingerprint " + record.fingerprint;
     text += L"\nbuild " + record.launcherBuild + L", " + record.mcVersion + L" " + record.loader;
     if (!record.zip.empty()) {
-        text += L"\n\nThe full logs are zipped at:\n" + record.zip +
-            L"\nOpen Remote Files on the main menu to read it on a phone or PC.";
+        text += L"\n\n" + std::wstring(Tr(L"The full logs are zipped at:")) + L"\n" + record.zip +
+            L"\n" + Tr(L"Open Remote Files on the main menu to read it on a phone or PC.");
     }
     return text;
 }

@@ -414,7 +414,7 @@ public:
                     StrokeRound(controllerBtn, state.modsProfileControllerModEnabled ? accent.Get() : muted.Get(), 12.0f, controllerFocus ? 3.0f : 2.0f);
                     DrawIcon(L"\uE7FC", D2D1::RectF(controllerBtn.left + 12.0f, controllerBtn.top, controllerBtn.left + 36.0f, controllerBtn.bottom),
                         state.modsProfileControllerModEnabled ? accent.Get() : muted.Get());
-                    DrawText(state.modsProfileControllerModEnabled ? L"Bandit On" : L"Bandit Off", smallMid_.Get(),
+                    DrawText(state.modsProfileControllerModEnabled ? Tr(L"Bandit On") : Tr(L"Bandit Off"), smallMid_.Get(),
                         D2D1::RectF(controllerBtn.left + 38.0f, controllerBtn.top, controllerBtn.right - 6.0f, controllerBtn.bottom),
                         state.modsProfileControllerModEnabled ? accent.Get() : muted.Get());
 
