@@ -103,6 +103,7 @@ struct AuthUiState {
 
     bool showSettings = false;
     bool settingsUpdateCheckOn = true;
+    std::wstring settingsLanguageName;
     int settingsSelected = 0;
     bool settingsReportingOn = false;
     bool settingsConfigured = false;

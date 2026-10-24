@@ -738,7 +738,7 @@ input,select{min-height:42px;min-width:0;max-width:100%;padding:8px 12px;backgro
             << "<div class=\"side-title\">Workspace</div><nav class=\"nav\" aria-label=\"Workspace\">"
             << "<a class=\"active\" aria-current=\"page\" href=\"" << UrlWithPinProfile("/", profileId) << "\">Overview</a>"
             << nav("profile", L"Game files") << nav("saves", L"Worlds")
-            << nav("mods", L"Mods") << nav("resourcepacks", L"Resource packs")
+            << nav("mods", L"Mods") << nav("resourcepacks", L"Resource packs") << nav("languages", L"Languages")
             << "</nav><div class=\"side-title\">Diagnostics</div><nav class=\"nav\" aria-label=\"Diagnostics\">"
             << nav("logs", L"Current logs") << nav("previous", L"Previous logs")
             << nav("crash", L"Crash reports") << nav("runtime", L"Runtime cache")
@@ -809,6 +809,10 @@ input,select{min-height:42px;min-width:0;max-width:100%;padding:8px 12px;backgro
         } else if (scope == "runtime") {
             root = runtimeRoot_ + L"\\game";
             title = L"Runtime cache";
+        } else if (scope == "languages") {
+            root = runtimeRoot_ + L"\\lang";
+            title = L"Languages";
+            writable = true;
         } else {
             return false;
         }
@@ -1645,7 +1649,7 @@ pollPackImport();
         return R"RFSPA(
 var cur='',edPath='',edOriginal='',canWrite=false,busy=false,saving=false,loadId=0,listing=null,editorFocus=null;
 var SCOPES=[
- {g:'Workspace',items:[{s:'profile',l:'Game files'},{s:'saves',l:'Worlds'},{s:'mods',l:'Mods'},{s:'resourcepacks',l:'Resource packs'}]},
+ {g:'Workspace',items:[{s:'profile',l:'Game files'},{s:'saves',l:'Worlds'},{s:'mods',l:'Mods'},{s:'resourcepacks',l:'Resource packs'},{s:'languages',l:'Languages'}]},
  {g:'Diagnostics',items:[{s:'logs',l:'Current logs'},{s:'previous',l:'Previous logs'},{s:'crash',l:'Crash reports'},{s:'runtime',l:'Runtime cache'}]}
 ];
 var ICON_DIR='<svg class="ic dir" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7V5h7l2 3h9v12H3V7Z"/></svg>';

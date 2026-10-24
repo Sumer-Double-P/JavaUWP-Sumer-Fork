@@ -47,6 +47,7 @@ MC.Xbox/
 | --- | --- |
 | `App.cpp` | `wWinMain`, CoreApplication lifecycle, high level `Run()` sequencing between auth, UI, downloads, and launch. |
 | `common/launcher_common` | Path helpers, environment access, shared string/path utilities used across modules. |
+| `common/i18n` | Language files from `lang` in the package and in `LocalState`, the saved language choice, and `Tr` and `TrFormat`, which look a string up by its English text and fall back to it. |
 | `common/crash_report` | Collect launcher and game diagnostics into crash report archives. |
 | `auth/minecraft_auth` | Device code sign in, token exchange, ownership verification, session state. |
 | `ui/launcher_ui` | Main menu rendering and interaction. |

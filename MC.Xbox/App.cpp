@@ -25,6 +25,7 @@
 
 #include "runtime_config.h"
 #include "launcher_common.h"
+#include "i18n.h"
 #include "crash_report.h"
 #include "mod_defaults.h"
 #include "minecraft_auth.h"
@@ -481,6 +482,7 @@ public:
         SetCurrentDirectoryW(exeDir.c_str());
         SetEnvironmentVariableW(L"MC_RUNTIME_DIR", exeDir.c_str());
         SetEnvironmentVariableW(L"MC_LOG_DIR", g_logDir.c_str());
+        i18n::Init();
         telemetry::ReportHardCrash(exeDir);
         telemetry::FlushQueueAsync();
         updates::StartCheckAsync();
