@@ -6,7 +6,7 @@ Notable changes to Bandit Launcher. Nightly packages are numbered by build revis
 
 ### Added
 
-**The launcher can be translated.** Settings has a new Language option, and each language is a plain text file in the `lang` folder. Anything a file does not translate stays in English. The first time it runs, the launcher picks a language that matches the console's setting if one is available. No translations ship yet. See `docs/TRANSLATING.md` for how to add one, including how to try a file from Remote Files, which has a new Languages folder.
+**The launcher can be translated.** Settings has a new Language option, and each language is a plain text file in the `lang` folder. Anything a file does not translate stays in English. Every screen and message is covered, from sign in errors to pack imports, and the Remote Files page follows the chosen language too. The first time it runs, the launcher picks a language that matches the console's setting if one is available. No translations ship yet. See `docs/TRANSLATING.md` for how to add one, including how to try a file from Remote Files, which has a new Languages folder.
 
 ## 2026-10-23
 
