@@ -59,6 +59,7 @@ MC.Xbox/
 | `net/http_client` | Shared HTTP helpers for downloads and APIs. |
 | `net/update_check` | Looks up the newest release on the build's channel and the changelog on GitHub, keeps the answer in `LocalState\updates`, and turns changelog markdown into plain text for the What's new page and the new version notice. The channel comes from `-ReleaseChannel` on `build.ps1`, so local builds do not check. |
 | `net/remote_file_server` | Local network upload/download UI backend. |
+| `net/html_translate` | Translates a page the Remote Files server sends by looking up its text, titles and placeholders by their English text. |
 | `net/web_relay_server` | Browser mouse touchpad served on the local network, forwarded to the relay input port. |
 | `launch/runtime_manager` | Manifest verification, parallel downloads, version JSON resolution, native library prep. |
 | `launch/minecraft_launch` | Shared JVM embed path: classpath assembly, natives, game args, process local Java startup. |

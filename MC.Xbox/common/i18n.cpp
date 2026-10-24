@@ -172,6 +172,11 @@ std::wstring CurrentCode() {
     return g_currentCode;
 }
 
+bool Active() {
+    const Table* table = g_current.load();
+    return table && !table->empty();
+}
+
 bool SetLanguage(const std::wstring& code) {
     {
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -196,6 +201,62 @@ const wchar_t* Tr(const wchar_t* english) {
     return found == table->end() ? english : found->second.c_str();
 }
 
+std::string TrU(const char* english) {
+    std::string translated;
+    return TryTrU(english, translated) ? translated : std::string(english);
+}
+
+std::string TrFormatU(const char* english, std::initializer_list<std::string> args) {
+    std::vector<std::wstring> wide;
+    for (const std::string& arg : args) wide.push_back(a2w(arg.c_str()));
+    const std::wstring key = a2w(english);
+    std::wstring text = Tr(key.c_str());
+    for (size_t i = 0; i < wide.size(); ++i) {
+        const std::wstring token = L"{" + std::to_wstring(i) + L"}";
+        for (size_t at = text.find(token); at != std::wstring::npos; at = text.find(token, at + wide[i].size())) {
+            text.replace(at, token.size(), wide[i]);
+        }
+    }
+    return w2a(text);
+}
+
+bool TryTrU(const std::string& english, std::string& translated) {
+    const Table* table = g_current.load();
+    if (!table || table->empty()) return false;
+
+    const auto found = table->find(a2w(english.c_str()));
+    if (found == table->end()) return false;
+    translated = w2a(found->second);
+    return true;
+}
+
+std::string TableJson() {
+    // quotes a string for JSON, and keeps a translation from closing the script tag it is written into
+    const auto quote = [](const std::wstring& text) {
+        std::string out = "\"";
+        for (const char ch : w2a(text)) {
+            switch (ch) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': break;
+            case '\t': out += "\\t"; break;
+            case '<': out += "\\u003c"; break;
+            default: out += ch;
+            }
+        }
+        return out + "\"";
+    };
+
+    std::string json = "{";
+    if (const Table* table = g_current.load()) {
+        for (const auto& pair : *table) {
+            if (json.size() > 1) json += ",";
+            json += quote(pair.first) + ":" + quote(pair.second);
+        }
+    }
+    return json + "}";
+}
 std::wstring TrFormat(const wchar_t* english, std::initializer_list<std::wstring> args) {
     std::wstring text = Tr(english);
     size_t index = 0;
