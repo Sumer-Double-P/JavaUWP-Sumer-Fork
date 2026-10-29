@@ -251,6 +251,19 @@ public final class ForgeControllerCompat {
         }
     }
 
+    // read by the keyboard input mixin, null leaves the vanilla movement alone
+    public static float[] analogMovement() {
+        ForgeControllerSettings settings = ForgeControllerSettings.get();
+        Minecraft client = Minecraft.m_91087_();
+        if (!active || settings.keyboardMovement || client == null || client.f_91080_ != null) {
+            return null;
+        }
+        return ControllerRuntime.shapedMovement(
+            -axis(GLFW.GLFW_GAMEPAD_AXIS_LEFT_X),
+            -axis(GLFW.GLFW_GAMEPAD_AXIS_LEFT_Y),
+            settings.moveDeadzone);
+    }
+
     private static void tickGameplay(Minecraft client) {
         ForgeControllerSettings settings = ForgeControllerSettings.get();
         Options options = client.f_91066_;
@@ -272,10 +285,11 @@ public final class ForgeControllerCompat {
 
         float lx = axis(GLFW.GLFW_GAMEPAD_AXIS_LEFT_X);
         float ly = axis(GLFW.GLFW_GAMEPAD_AXIS_LEFT_Y);
-        setHeld(keys.forward, ly < -settings.moveDeadzone);
-        setHeld(keys.back, ly > settings.moveDeadzone);
-        setHeld(keys.left, lx < -settings.moveDeadzone);
-        setHeld(keys.right, lx > settings.moveDeadzone);
+        boolean analog = !settings.keyboardMovement;
+        setHeld(keys.forward, !analog && ly < -settings.moveDeadzone);
+        setHeld(keys.back, !analog && ly > settings.moveDeadzone);
+        setHeld(keys.left, !analog && lx < -settings.moveDeadzone);
+        setHeld(keys.right, !analog && lx > settings.moveDeadzone);
         setHeld(keys.jump, held(settings, ControllerAction.JUMP));
 
         boolean sneakHeld;

@@ -298,7 +298,7 @@ public final class NeoForgeControllerCompat {
     }
 
     private static boolean analogMovementEnabled(NeoForgeControllerSettings settings) {
-        return NeoForgeMovementApi.analogSupported() && !settings.keyboardMovement;
+        return !settings.keyboardMovement;
     }
 
     // read by the keyboard input mixin, null leaves the vanilla movement alone
