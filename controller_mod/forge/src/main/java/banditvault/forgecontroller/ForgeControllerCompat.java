@@ -56,6 +56,8 @@ public final class ForgeControllerCompat {
     private static boolean loggedLookApplied;
     private static Object lastCursorScreen;
     private static Object lastRelayCursorScreen;
+    private static Screen queuedCursorScreen;
+    private static GuiGraphics queuedCursorGraphics;
     private static double lastRelayCursorX = Double.NaN;
     private static double lastRelayCursorY = Double.NaN;
     private static boolean relayOwnsCursor;
@@ -165,8 +167,19 @@ public final class ForgeControllerCompat {
         applyLook(client.f_91074_, axis(GLFW.GLFW_GAMEPAD_AXIS_RIGHT_X), y, seconds, settings);
     }
 
+    // Screens only queue the cursor. It is drawn from GameRenderer once the screen,
+    // anything mods draw over it and the toasts are done, so it always ends up on top.
     public static void renderCursor(Screen screen, GuiGraphics graphics) {
-        if (!active || screen == null || graphics == null) {
+        queuedCursorScreen = screen;
+        queuedCursorGraphics = graphics;
+    }
+
+    public static void renderQueuedCursor() {
+        Screen screen = queuedCursorScreen;
+        GuiGraphics graphics = queuedCursorGraphics;
+        queuedCursorScreen = null;
+        queuedCursorGraphics = null;
+        if (!active || screen == null || graphics == null || Minecraft.m_91087_().f_91080_ != screen) {
             return;
         }
         if (relayOwnsCursor || renderedCursorX < 0.0 || renderedCursorY < 0.0) {

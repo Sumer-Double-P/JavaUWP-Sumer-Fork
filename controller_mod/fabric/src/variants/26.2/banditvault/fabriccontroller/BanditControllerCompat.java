@@ -52,6 +52,8 @@ public final class BanditControllerCompat {
     private static boolean sprintToggled;
     private static Object lastCursorScreen;
     private static Object lastRelayCursorScreen;
+    private static Screen queuedCursorScreen;
+    private static GuiGraphicsExtractor queuedCursorContext;
     private static double lastRelayCursorX = Double.NaN;
     private static double lastRelayCursorY = Double.NaN;
     private static boolean relayOwnsCursor;
@@ -147,7 +149,18 @@ public final class BanditControllerCompat {
         applyLook(client.player, axis(GLFW.GLFW_GAMEPAD_AXIS_RIGHT_X), y, seconds, settings);
     }
 
+    // Screens only queue the cursor. It is drawn from GameRenderer once the screen,
+    // anything mods draw over it and the toasts are done, so it always ends up on top.
     public static void renderCursor(Screen screen, GuiGraphicsExtractor context) {
+        queuedCursorScreen = screen;
+        queuedCursorContext = context;
+    }
+
+    public static void renderQueuedCursor() {
+        Screen screen = queuedCursorScreen;
+        GuiGraphicsExtractor context = queuedCursorContext;
+        queuedCursorScreen = null;
+        queuedCursorContext = null;
         Minecraft client = Minecraft.getInstance();
         if (screen instanceof BanditControllerSettingsScreen || screen instanceof BanditControllerRadialScreen) {
             return;
@@ -155,12 +168,12 @@ public final class BanditControllerCompat {
         if (!active || screen == null || context == null || client == null || FabricClientApi.screen(client) != screen) {
             return;
         }
+        FabricScreenApi.beginCursorLayer(context);
         if (!relayOwnsCursor) renderControllerGuide(screen, context, client);
-        if (relayOwnsCursor || cursorX < 0.0 || cursorY < 0.0) return;
-
-        int x = (int)Math.round(cursorX);
-        int y = (int)Math.round(cursorY);
-        FabricScreenApi.drawCursor(context, x, y);
+        if (!relayOwnsCursor && cursorX >= 0.0 && cursorY >= 0.0) {
+            FabricScreenApi.drawCursor(context, (int)Math.round(cursorX), (int)Math.round(cursorY));
+        }
+        FabricScreenApi.endCursorLayer(context);
     }
 
     private static void renderControllerGuide(Screen screen, GuiGraphicsExtractor context, Minecraft client) {
